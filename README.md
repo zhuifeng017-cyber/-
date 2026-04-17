@@ -1,72 +1,99 @@
 # 同程旅行评论抓取工具
 
-抓取同程旅行（ly.com）上 **2025年10月以前** 的所有酒店/景点评论，保存为 CSV 和/或 JSON。
+目标页面: `https://www.ly.com/scenery/BookSceneryTicket_19987.html`  
+抓取所有 **2025年10月以前** 的评论，保存为 CSV 和 JSON。
 
-## 安装
+## 安装依赖
 
 ```bash
 pip install -r requirements.txt
 ```
 
+还需要安装 [ChromeDriver](https://chromedriver.chromium.org/)，版本需与本机 Chrome 匹配：
+
+```bash
+# Ubuntu/Debian
+apt install chromium-driver
+
+# macOS
+brew install chromedriver
+
+# 或手动下载放入 PATH
+```
+
 ## 使用方法
 
-### 抓取酒店评论
+### 方式一：全自动（推荐）
+
+Selenium 自动打开页面、拦截评论接口、批量抓取：
 
 ```bash
-python scraper.py --hotel-ids 12345 67890
+python scraper.py
 ```
 
-### 抓取景点评论
+### 方式二：手动指定接口
+
+若自动探测失败，手动在浏览器中找到评论接口：
+
+1. 用 Chrome 打开目标页面
+2. 按 `F12` → `Network` 选项卡 → 筛选框输入 `comment`
+3. 滚动到页面评论区，触发加载
+4. 复制评论请求的 URL 和 Cookie
 
 ```bash
-python scraper.py --scenic-ids 11111 22222
+python scraper.py \
+  --api-url "https://www.ly.com/api/scenic/comment/getCommentList?scenicId=19987" \
+  --cookies "sessionId=xxx; token=yyy"
 ```
 
-### 同时抓取酒店和景点
+### 方式三：跳过 Selenium
 
 ```bash
-python scraper.py --hotel-ids 12345 --scenic-ids 11111 --output-dir results --format both
+python scraper.py --no-selenium
 ```
 
-### 全部参数
+## 参数说明
 
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `--hotel-ids` | 酒店ID列表（空格分隔） | 无 |
-| `--scenic-ids` | 景点ID列表（空格分隔） | 无 |
-| `--output-dir` | 输出目录 | `output` |
-| `--format` | 输出格式：`csv` / `json` / `both` | `both` |
-
-## 如何获取酒店/景点ID
-
-1. 在浏览器打开同程旅行酒店或景点详情页
-2. URL 中的数字即为 ID，例如：
-   - `https://hotels.ly.com/hotel/detail/12345` → 酒店ID `12345`
-   - `https://www.ly.com/scenic/detail/11111` → 景点ID `11111`
+| 参数 | 说明 |
+|------|------|
+| `--no-selenium` | 跳过 Selenium，直接探测候选接口 |
+| `--api-url` | 手动指定评论接口 URL |
+| `--cookies` | 浏览器 Cookie 字符串 |
+| `--output-dir` | 输出目录（默认: `output`） |
 
 ## 输出格式
 
-结果保存在 `output/` 目录，文件名含时间戳：
+结果保存在 `output/` 目录：
 
-- `tongcheng_comments_YYYYMMDD_HHMMSS.csv`
-- `tongcheng_comments_YYYYMMDD_HHMMSS.json`
+- `comments_YYYYMMDD_HHMMSS.csv`
+- `comments_YYYYMMDD_HHMMSS.json`
 
 ### 字段说明
 
 | 字段 | 说明 |
 |------|------|
-| `type` | 类型：`hotel` 或 `scenic` |
-| `hotel_id` / `scenic_id` | 酒店或景点ID |
+| `product_id` | 景点ID (19987) |
 | `comment_id` | 评论ID |
 | `user_name` | 用户昵称 |
 | `score` | 评分 |
 | `content` | 评论内容 |
-| `date` | 评论时间（格式化） |
+| `date` | 格式化时间 |
 | `raw_date` | 原始时间字符串 |
-| `room_type` | 房型（仅酒店） |
+| `images` | 评论图片列表 (JSON) |
+| `travel_type` | 出行类型 |
 
-## 注意事项
+## 工作原理
 
-- 工具已内置 0.8 秒请求间隔，避免对服务器造成压力
-- 仅抓取 2025-10-01 之前发布的评论
-- 如遇到 403 或反爬拦截，可在 `scraper.py` 的 `HEADERS` 中添加 Cookie
+```
+打开页面
+  ↓
+seleniumwire 拦截所有 XHR/fetch 请求
+  ↓
+找到含 "comment"/"review" 的接口 URL
+  ↓
+用 requests 分页抓取所有评论
+  ↓
+过滤 date < 2025-10-01 的评论
+  ↓
+保存 CSV + JSON
+```
