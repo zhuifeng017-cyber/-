@@ -1,6 +1,6 @@
 # 同程旅行小程序评论抓取
 
-**目标景点（微信小程序）：**
+**目标景点（微信PC版小程序）：**
 - 凤凰古城
 - 矮寨奇观旅游区-矮寨大桥
 - 德夯峡谷景区
@@ -12,18 +12,17 @@
 
 ## 工作原理
 
-小程序无法直接爬取，需要通过 **mitmproxy 中间人代理** 拦截 HTTPS 请求，
-获取评论接口后再批量抓取。
-
 ```
-手机小程序  →  mitmproxy代理（电脑）  →  intercept.py 保存接口信息
-                                              ↓
-                                        scraper.py 批量抓取所有评论
+微信PC小程序 → mitmproxy本地代理 → intercept.py 捕获评论接口
+                                           ↓
+                              scraper.py 自动分页抓取所有评论
+                                           ↓
+                              output/ 目录保存 CSV + JSON
 ```
 
 ---
 
-## 操作步骤
+## 操作步骤（全在电脑上）
 
 ### 第一步：安装依赖
 
@@ -31,75 +30,62 @@
 pip install -r requirements.txt
 ```
 
-还需要安装 mitmproxy（如未包含在pip中）：
-```bash
-# macOS
-brew install mitmproxy
-
-# Windows: 下载安装包 https://mitmproxy.org/
-```
-
-### 第二步：启动拦截代理
+### 第二步：一键启动代理 + 拦截
 
 ```bash
-mitmproxy -s intercept.py --listen-port 8888
-# 或使用无界面模式
-mitmdump -s intercept.py --listen-port 8888
+python proxy_setup.py start
 ```
 
-### 第三步：手机配置代理
+脚本会自动：
+1. 备份当前系统代理设置
+2. 设置系统代理到 `127.0.0.1:8888`
+3. 自动安装 mitmproxy CA 证书到系统信任列表
+4. 启动 mitmproxy 拦截脚本
 
-1. 手机和电脑连同一个 Wi-Fi
-2. 手机 Wi-Fi 设置 → 手动代理 → 填入电脑IP和端口 `8888`
-3. 手机浏览器打开 `http://mitm.it`，安装 mitmproxy CA 证书
-4. **iOS**: 安装后还需在「设置 → 通用 → 关于本机 → 证书信任设置」中启用
-5. **Android**: 安装后在「设置 → 安全 → 用户凭据」中信任
+> **Windows** 需要以管理员身份运行（右键 → 以管理员身份运行终端）  
+> **macOS** 安装证书时会要求输入系统密码
 
-### 第四步：触发小程序评论加载
+### 第三步：在微信PC版中操作
 
-打开微信，进入同程旅行小程序，依次进入每个景点：
-1. **凤凰古城** → 滑动到评论区，向下滚动2-3页
+打开微信 → 搜索「同程旅行」小程序，依次进入每个景点：
+
+1. **凤凰古城** → 点击「评论/点评」标签 → 向下滚动 2~3 页
 2. **矮寨奇观旅游区-矮寨大桥** → 同上
 3. **德夯峡谷景区** → 同上
 4. **芙蓉镇** → 同上
 
-此时电脑终端会显示捕获到的评论接口，并自动保存到 `captured_apis.json`。
+终端会打印捕获到的接口，例如：
+```
+✓ 捕获: [凤凰古城] https://api.ly.com/scenic/comment/list
+  方法: GET
+  参数: {'scenicId': '12345', 'pageIndex': '1', 'pageSize': '20'}
+```
 
-### 第五步：批量抓取评论
+4个景点都捕获到后，按 `Ctrl+C` 结束，系统代理自动还原。
+
+### 第四步：批量抓取评论
 
 ```bash
 python scraper.py
 ```
 
-结果保存在 `output/` 目录：
+自动读取 `captured_apis.json`，逐景点分页拉取所有 2025-10-01 之前的评论。
+
+---
+
+## 输出文件
 
 ```
 output/
 ├── comments_20241017_143022.csv        # 全部评论（汇总）
 ├── comments_20241017_143022.json
-├── 凤凰古城_20241017_143022.csv       # 每个景点单独一份
+├── 凤凰古城_20241017_143022.csv
 ├── 矮寨大桥_20241017_143022.csv
 ├── 德夯峡谷景区_20241017_143022.csv
 └── 芙蓉镇_20241017_143022.csv
 ```
 
----
-
-## 手动指定接口（如自动捕获失败）
-
-如果你已经用 Charles / Fiddler / 浏览器DevTools 找到了接口 URL：
-
-```bash
-python scraper.py \
-  --api-url "https://api.ly.com/scenic/comment/list" \
-  --scenic-id "12345" \
-  --name "凤凰古城" \
-  --cookies "sessionId=xxx; token=yyy"
-```
-
----
-
-## 输出字段说明
+### 字段说明
 
 | 字段 | 说明 |
 |------|------|
@@ -109,7 +95,7 @@ python scraper.py \
 | `user_name` | 用户昵称 |
 | `score` | 评分 |
 | `content` | 评论内容 |
-| `date` | 格式化时间（YYYY-MM-DD HH:MM:SS） |
+| `date` | 格式化时间 |
 | `raw_date` | 原始时间字符串 |
 | `images` | 评论图片列表（JSON数组） |
 | `travel_type` | 出行类型 |
@@ -117,8 +103,20 @@ python scraper.py \
 
 ---
 
-## 注意事项
+## 常见问题
 
-- 脚本会自动过滤 `date >= 2025-10-01` 的评论
-- 每页请求间隔 0.8 秒，避免频率过高
-- 关闭代理后记得恢复手机 Wi-Fi 设置
+**Q: 终端没有捕获到任何请求？**  
+A: 微信小程序可能不走系统代理。解决方法：
+1. 完全退出微信，重新打开（让微信读取新的代理设置）
+2. 或使用 [Proxifier](https://www.proxifier.com/) 强制微信走代理
+
+**Q: 捕获到请求但响应是乱码？**  
+A: CA 证书未正确安装，参考第二步手动安装：
+- Windows: `%USERPROFILE%\.mitmproxy\mitmproxy-ca-cert.p12` → 双击 → 安装到「受信任的根证书颁发机构」
+- macOS: `~/.mitmproxy/mitmproxy-ca-cert.pem` → 双击加入钥匙串 → 设为「始终信任」
+
+**Q: scraper.py 运行后提示「未找到已捕获的接口」？**  
+A: 第三步还没有操作小程序，`captured_apis.json` 还是空的，按步骤操作后重试。
+
+**Q: 还原代理失败？**  
+A: 手动运行 `python proxy_setup.py stop`，或在系统设置里直接关闭代理。
